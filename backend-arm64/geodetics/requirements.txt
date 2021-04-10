@@ -1,0 +1,16 @@
+# Basics
+flake8==3.7.9
+requests==2.23.0
+
+# Cassandra
+cassandra-driver==3.22.0
+
+# Yardstick dependencies
+scipy
+scikit-image
+lap
+filterpy
+matplotlib
+
+# socketio for UI stream
+python-socketio[client]

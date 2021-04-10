@@ -1,0 +1,20 @@
+# IDE
+.idea
+.vscode
+
+# Custum start scripts
+start_office.sh
+start_home.sh
+
+elk-stack/elk
+elk-stack/logstash.conf
+
+# Python
+/venv/
+/dist/
+/__pycache__/
+*.pyc
+*.egg*
+
+# log files
+**/*.log

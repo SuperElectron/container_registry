@@ -1,0 +1,151 @@
+# This is an example docker-compose.yml for your application
+version: '3.3'
+
+services:
+
+  reverse-proxy:
+    container_name: reverse-proxy
+    image: traefik
+    hostname: traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "81:81"     # The HTTP port
+      - "8080:8080" # The Web UI (enabled by --api)
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro" # So that Traefik can listen to the Docker events
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.2
+
+  api:
+    container_name: api
+    image: api:nx
+    command: sleep infinity # ["python3", "manage.py"]
+    volumes:
+      - ./api:/api
+    ports:
+      - '3011:3011' # Web App port found in .env file
+    env_file:
+      - ".env" # stores credentials and system variables
+    environment:
+      - FLASK_ENV=${FLASK_ENV}
+      - APP_SETTINGS=${APP_SETTINGS}
+      - DATABASE_IP=${DATABASE_IP}
+      - DATABASE_IP_TEST=${DATABASE_IP_TEST}
+      - HOST=${HOST}
+      - PORT=${PORT}
+      - API_LOGGING_DEV=${API_LOGGING_DEV}
+      - API_LOGGING_TEST=${API_LOGGING_TEST}
+      - API_LOGGING_PROD=${API_LOGGING_PROD}
+      - API_LOGGING_PIPELINE=${API_LOGGING_PIPELINE}
+    depends_on:
+      - database
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.3
+
+  database:
+    container_name: database
+    image: database:nx
+    command: ["cassandra", "-f"]
+    volumes:
+      - ./database:/database
+    ports:
+      - '7000:7000' # default communication port (inter-node)
+      - '7001:7001' # default encrypted port for inter-node
+      - '7199:7199' # JMX management clients
+      - '9042:9042' # native protocol
+      - '9160:9160' # client port (thrift)
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.4
+
+  zookeeper:
+    container_name: zookeeper
+    image: zookeeper:nx
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.5
+
+  kafka0:
+    container_name: kafka0
+    image: kafka0:nx
+    ports:
+      - '9092:9092'   # LISTENER_HOST     for traffic on computer which hosts docker containers (`localhost`).
+      - '29092:29092' # LISTENER_DOCKER   for internal traffic on the Docker network (network: custom_network)
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 0
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: LISTENER_DOCKER://kafka0:29092,LISTENER_HOST://kafka0:9092
+      KAFKA_ADVERTISED_LISTENERS: LISTENER_DOCKER://kafka0:29092,LISTENER_HOST://172.22.0.6:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER:PLAINTEXT,LISTENER_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 100
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CREATE_TOPICS: "nvidia_eo:8:1,nvidia_ir:8:1,fusion_ds:8:1,fusion_klv:8:1"
+      KAFKA_LOG_RETENTION_MS: 10000 # delete messages older than 10s
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 5000 # check every 5s for messages that should be deleted
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.6
+
+  kafkacat:
+    container_name: kafkacat
+    image: kafkacat:nx
+    command: sleep infinity
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.7
+
+  geodetics:
+    container_name: geodetics
+    image: geodetics:nx
+    command: sleep infinity # ["./entrypoint.sh", "python/geodetics/program/example.py"]
+    volumes:
+      - ./geodetics:/geodetics
+    ports:
+      - 5011:5011 # application port
+    depends_on:
+      - zookeeper
+      - kafka0
+      - kafkacat
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.8
+
+  gstreamer:
+    container_name: gstreamer
+    image: gstreamer:nx
+    command: bash -c "python3 rtsp-server.py '172.22.0.10'" # sleep infinity
+    ports:
+      - "15000:15000/udp" # application port >> stream.eo_klv       : gst-launch-1.0 rtspsrc location=rtsp://172.22.0.10:15000/stream.eo_klv ! rtpklvdepay ! fakesink dump=1  # noqa 501
+      - "15001:15001/udp" # application port >> stream.eo_video     : gst-play-1.0 rtsp://172.22.0.10:15001/stream.eo_video  # noqa 501
+      - "15002:15002/udp" # application port >> stream.ir_klv       : gst-launch-1.0 rtspsrc location=rtsp://172.22.0.10:15002/stream.ir_klv ! rtpklvdepay ! fakesink dump=1  # noqa 501
+      - "15003:15003/udp" # application port >> stream.ir_video     : gst-play-1.0 rtsp://172.22.0.10:15003/stream.ir_video  # noqa 501
+      - "15004:15004/udp" # application port >> stream.ir_klv_test  : gst-launch-1.0 rtspsrc location=rtsp://172.22.0.10:15004/stream.ir_klv_test ! rtpklvdepay ! fakesink dump=1  # noqa 501
+      - "15005:15005/udp" # application port >> stream.eo_klv_test  : gst-launch-1.0 rtspsrc location=rtsp://172.22.0.10:15005/stream.eo_klv_test ! rtpklvdepay ! fakesink dump=1  # noqa 501
+    networks:
+      custom_network:
+        ipv4_address: 172.22.0.10
+
+networks:
+  custom_network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 172.22.0.0/24

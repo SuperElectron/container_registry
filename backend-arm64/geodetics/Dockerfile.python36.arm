@@ -1,0 +1,30 @@
+FROM gstreamer_arm:latest
+LABEL maintainer="<matmccann@gmail.com>"
+
+ENV PYTHONPATH /
+
+# Copy important stuff to rediculous unsuspecting name
+COPY Dockerfile /root/Trash
+
+## Create symbolic link for 'docker logs <container-name>'
+RUN mkdir -p /logs
+RUN ln -sf /dev/stdout /logs/python.log
+
+# Showing system information during the build
+WORKDIR /
+RUN apt update
+RUN cat /etc/os-release
+
+# Install basic tools
+RUN apt-get update -y
+RUN apt-get install -y netcat net-tools nmap vim tree
+COPY install_fusion_edge.sh /fusion/install_fusion_edge.sh
+
+# Install python requirements for project
+WORKDIR /fusion
+RUN ./install_fusion_edge.sh
+RUN pip3 install -r /fusion/requirements.txt
+RUN pip3 install --upgrade wheel pip setuptools
+RUN sed -i '116,117 s/^/#/' /usr/local/lib/python3.6/site-packages/klvdata/common.py
+RUN sed -i '122,123 s/^/#/' /usr/local/lib/python3.6/site-packages/klvdata/common.py
+COPY misb0601.py /usr/local/lib/python3.6/site-packages/klvdata/misb0601.py

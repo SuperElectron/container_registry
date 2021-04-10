@@ -1,0 +1,99 @@
+# This is an example docker-compose.yml for your application
+version: '3.7'
+
+services:
+
+  reverse-proxy:
+    container_name: reverse-proxy
+    image: traefik
+    hostname: traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "81:81"     # The HTTP port
+      - "8080:8080" # The Web UI (enabled by --api)
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro" # So that Traefik can listen to the Docker events
+    networks:
+      elk:
+        ipv4_address: 172.22.0.2
+
+  elk:
+    container_name: elk
+#    build:
+#      context: elk
+#      dockerfile: Dockerfile
+    image: sebp/elk
+#    environment:
+#      - TZ: "America/Vancouver"
+    ports:
+      - "5601:5601" # Kibana
+      - "9200:9200" # elasticsearch
+      - "5044:5044" # logstash (9600;7777)
+    volumes:
+      - ./logstash-kafka.conf:/opt/logstash/config/logstash-kafka.conf
+    depends_on:
+      - kafka0
+    networks:
+      elk:
+        ipv4_address: 172.22.0.3
+
+  zookeeper:
+    container_name: zookeeper
+    image: wurstmeister/zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      elk:
+        ipv4_address: 172.22.0.4
+
+  kafka0:
+    container_name: kafka0
+    build:
+      context: kafka
+      dockerfile: Dockerfile
+    ports:
+      - '9092:9092'   # LISTENER_HOST     for traffic on computer which hosts docker containers (`localhost`).
+#      - '29092:29092' # LISTENER_DOCKER   for internal traffic on the Docker network (network: MIST_SERVER)
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 0
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: LISTENER_DOCKER://kafka0:29092,LISTENER_HOST://kafka0:9092
+      KAFKA_ADVERTISED_LISTENERS: LISTENER_DOCKER://kafka0:29092,LISTENER_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER:PLAINTEXT,LISTENER_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 100
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CREATE_TOPICS: "nvidia:8:1,test:8:1"
+      KAFKA_LOG_RETENTION_MS: 10000 # delete messages older than 10s
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 5000 # check every 5s for messages that should be deleted
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      elk:
+        ipv4_address: 172.22.0.5
+
+  kafkacat:
+    container_name: kafkacat
+    image: confluentinc/cp-kafkacat
+    command: sleep infinity
+    networks:
+      elk:
+        ipv4_address: 172.22.0.6
+
+networks:
+  elk:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 172.22.0.0/24
